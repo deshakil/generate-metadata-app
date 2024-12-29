@@ -360,7 +360,10 @@ def generate_metadata(file_name, file_path, data, file_stream):
         }
     else:
         return None
-
+        
+@app.route('/')
+def home():
+    return "Running"
 
 @app.route('/generate-metadata', methods=['POST'])
 def generate_metadata_endpoint():
