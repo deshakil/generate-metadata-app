@@ -2,7 +2,7 @@ flask==3.0.3
 openai==0.28.0
 pytesseract==0.3.13
 pillow==10.4.0
-textract==1.6.4
+textract==1.6.3
 PyPDF2==3.0.1
 python-pptx==0.6.23
 python-docx==1.1.2
