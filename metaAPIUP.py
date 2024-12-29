@@ -365,7 +365,7 @@ def generate_metadata(file_name, file_path, data, file_stream):
 def home():
     return "Running"
 
-@app.route('/generate-metadata', methods=['POST'])
+@app.route('/generateMetadata', methods=['POST'])
 def generate_metadata_endpoint():
     data = request.get_json()
     user_id = data.get('userID')
