@@ -8,3 +8,4 @@ python-pptx==0.6.18
 python-docx==1.1.2
 azure.storage.blob==12.23
 gunicorn==23.0.0
+requests==2.32.3
