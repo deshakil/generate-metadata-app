@@ -21,7 +21,7 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 16 MB limit for content 
 AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING_1')
 CONTAINER_NAME = 'weez-user-data'
 
-blob_service_client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING_1'))
+blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 
 
