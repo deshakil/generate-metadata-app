@@ -12,15 +12,16 @@ from textract import process
 from flask import Flask, request, jsonify
 from io import BytesIO
 from azure.storage.blob import BlobServiceClient, ContentSettings
+import tempfile
 
 app = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True  # Format JSON response nicely
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 16 MB limit for content size
 
-AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
-CONTAINER_NAME = 'documents'
+AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING_1')
+CONTAINER_NAME = 'weez-user-data'
 
-blob_service_client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))
+blob_service_client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING_1'))
 container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 
 
@@ -90,7 +91,20 @@ def extract_text_from_image(image_stream):
 
 # Textract for documents
 def extract_text_from_document(doc_stream):
-    return textract.process(doc_stream).decode('utf-8')
+    """return textract.process(doc_stream).decode('utf-8')"""
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        # Write the content of the BytesIO stream to the temp file
+        temp_file.write(doc_stream.read())
+        temp_file_path = temp_file.name  # Get the path of the temporary file
+
+    try:
+        # Pass the temporary file path to textract
+        text = textract.process(temp_file_path).decode('utf-8')
+    finally:
+        # Ensure the temporary file is deleted after processing
+        os.remove(temp_file_path)
+
+    return text
 
 # Direct read for coding files
 def extract_text_from_code(code_stream):
@@ -147,10 +161,10 @@ def extract_ids_and_classify(data):
 """
 def extract_ids_and_classify(file_stream):
     messages = [
-        {"role": "user", "content": f"""Your work is to find out the necessary ids present in the text it can be transaction id, customer id, receipt id, GSTIN id based on the text. 
+        {"role": "user", "content": f"""Assume you are a bill Your work is to find out the necessary ids present in the text it can be transaction id, customer id, receipt id, GSTIN id based on the text. 
          Hence retrieve the ids from the text ans just output those id present in the text and nothing else. (ignore the address and phone no. also addresses) format of output 
-         e.g Receipt ID:'[Receipt ID], you need to output only the ids that are present in the text, you should be wise enough to differentiate between a receipt/invoice type of text 
-         and a normal text.
+         e.g Receipt ID:'[Receipt ID], you need to output only the ids that are present in the text, you should be wise enough to differentiate between a receipt/invoice  
+         and a normal document.
          :\n\n{file_stream[:3000]}"""}
     ]
     response = openai.ChatCompletion.create(
