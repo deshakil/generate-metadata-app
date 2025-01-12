@@ -19,9 +19,14 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 16 MB limit for content 
 
 AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING_1')
 CONTAINER_NAME = 'weez-user-data'
+AZURE_METADATA_STORAGE_CONNECTION_STRING=os.getenv('AZURE_METADATA_STORAGE_CONNECTION_STRING')
+METADATA_CONTAINER_NAME='weez-files-metadata'
 
 blob_service_client = BlobServiceClient.from_connection_string(os.getenv('AZURE_STORAGE_CONNECTION_STRING_1'))
 container_client = blob_service_client.get_container_client(CONTAINER_NAME)
+
+metadata_blob_service_client=BlobServiceClient.from_connection_string(os.getenv('AZURE_METADATA_STORAGE_CONNECTION_STRING'))
+metadata_container_client=metadata_blob_service_client.get_container_client(METADATA_CONTAINER_NAME)
 
 
 # Set your OpenAI API key
@@ -44,13 +49,25 @@ coding_extensions = (
 
 def generate_and_save_metadata(metadata,file_name, user_id):
       # Replace with actual metadata generation logic
-    metadata_blob_client = container_client.get_blob_client(f"{user_id}/{file_name}.json")
-    metadata_blob_client.upload_blob(
-        data=json.dumps(metadata),
-        overwrite=True,
-        content_settings=ContentSettings(content_type="application/json")
-    )
+    metadata_blob_client = metadata_container_client.get_blob_client(f"{user_id}/{file_name}.json")
+    if not metadata_blob_client.exists():
+          # If it doesn't exist, upload the metadata and create the blob
+          metadata_blob_client.upload_blob(
+              data=json.dumps(metadata),
+              overwrite=False,  # Prevents overwriting in case of race conditions
+              content_settings=ContentSettings(content_type="application/json")
+               )
+    else:
+          print(f"Blob {user_id}/{file_name}.json already exists. Metadata not uploaded.")
+          return
+    original_blob_client = metadata_blob_service_client.get_blob_client(f"{user_id}/{file_name}.json")
 
+      # Delete the original file
+    try:
+          original_blob_client.delete_blob()
+          print(f"Original file {file_name} deleted successfully from the weez-user-file container.")
+    except Exception as e:
+          print(f"Failed to delete the original file {file_name}: {e}")
 
 
 def read_blob_to_memory(container_name, blob_name):
