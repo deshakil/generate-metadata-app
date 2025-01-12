@@ -60,7 +60,7 @@ def generate_and_save_metadata(metadata,file_name, user_id):
     else:
           print(f"Blob {user_id}/{file_name}.json already exists. Metadata not uploaded.")
           return
-    original_blob_client = metadata_blob_service_client.get_blob_client(f"{user_id}/{file_name}.json")
+    original_blob_client = metadata_blob_service_client.get_blob_client(blob=f"{user_id}/{file_name}", container="weez-user-data")
 
       # Delete the original file
     try:
@@ -404,7 +404,7 @@ def generate_metadata_endpoint():
     file_path=data.get('filePath')
     if not user_id or not file_name:
         return jsonify({'error': 'userID and fileName are required'}), 400
-    blob_name=f"{user_id}/{file_name}.json"
+    blob_name=f"{user_id}/{file_name}"
     file_stream = read_blob_to_memory(CONTAINER_NAME, blob_name)
     print("File Read Done")
     file_type = get_file_type(file_name)
