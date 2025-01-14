@@ -9,3 +9,4 @@ python-docx==1.1.2
 azure.storage.blob==12.23
 gunicorn==23.0.0
 requests==2.32.3
+openpyxl==3.1.5
