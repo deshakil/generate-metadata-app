@@ -261,7 +261,10 @@ def process_text_for_summarization_or_analysis(file_type, file_stream):
 
 def summarize_text(file_stream):
     messages = [
-        {"role": "user", "content": f"Summarize the following text in 20 words:\n\n{file_stream[:3000]}"}
+        {"role": "user", "content": f"""Summarize the main content of the following document in a precise and concise manner, focusing only on the core details. 
+    Ensure the summary is structured in a single paragraph and is useful for metadata generation.\n\n{file_stream[:5000]}
+    Format the summary as a single sentence of no more than 20 words.
+    """}
     ]
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
@@ -340,18 +343,21 @@ def extract_ids_and_classify(file_stream):
 # 5. Topic extraction
 def extract_single_topic(file_stream):
     prompt = f"""
-    Analyze the following text and accurately identify the primary subject being discussed. 
-    Focus only on the central idea of the entire text, ignoring any minor details. 
-    Specifically, return:
-    - Topic name: A concise phrase that captures the main topic of the text.
-    - Top words: The most significant and relevant words associated with the main topic.[let this be a list]
+    Analyze the following text and identify the primary topic of the document. Focus on determining:
+    - The nature of the document (e.g., Resume, Invoice, Project Report, Research Paper, etc.).
+    - The associated person, company, or entity (if applicable).
+    - The subject or key purpose of the document.
 
-    Ensure that the response reflects the actual subject and key terms present in the text. 
+    Return a **single descriptive sentence** combining these elements to serve as a new, meaningful file name. For example:
+    - If it’s Harshith's report on Data Structures, return: "Data Structures Report of Harshith".
+    - If it’s a resume for Shokat Ahmed, return: "Resume of Shokat Ahmed".
+    - If it’s an invoice for Acme Corp, return: "Invoice for Acme Corp".
+    - If it’s a generic research paper, return: "Research Paper on Climate Change".
 
     Text:
-    {file_stream[:2000]}
+    {file_stream[:5000]}
 
-    Format the result as a valid JSON object (don't include escape characters).
+    Provide only the single descriptive sentence as output, with no additional text or formatting.
     """
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
@@ -384,14 +390,13 @@ def generate_contextual_tags(file_stream):
 # 7. Check document importance
 def check_document_importance(file_stream):
     prompt = f"""
-    is this important document, if the document contains some deadlines or 
-    important message  or important information about something upcoming consider it as important. 
-    Answer the importance in "YES" or "NO". Assume you are a working professional or student, and 
-    tell me whether this document is important or not. Answer in only "YES" or "NO". Perform your 
-    job very precisely and accurately
+    Analyze the following document and determine whether it contains critical information such as deadlines, important messages, 
+    or key updates. Consider the perspective of a working professional or college student or school student. 
+
+    Return your response as "YES" (important) or "NO" (not important).
 
     Text:
-    {file_stream[:3000]}
+    {file_stream[:5000]}
     """
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
