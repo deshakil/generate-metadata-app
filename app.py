@@ -343,21 +343,36 @@ def extract_ids_and_classify(file_stream):
 # 5. Topic extraction
 def extract_single_topic(file_stream):
     prompt = f"""
-    Analyze the following text and identify the primary topic of the document. Focus on determining:
-    - The nature of the document (e.g., Resume, Invoice, Project Report, Research Paper, etc.).
-    - The associated person, company, or entity (if applicable).
-    - The subject or key purpose of the document.
+    Analyze the following text and identify 3-4 key sub-topics that summarize the content of the document. 
+    Focus on extracting meaningful, specific, and relevant topics or ideas discussed in the text. Avoid generic or overly broad terms and be consistent and specific to the text.
 
-    Return a **single descriptive sentence** combining these elements to serve as a new, meaningful file name. For example:
-    - If it’s Harshith's report on Data Structures, return: "Data Structures Report of Harshith".
-    - If it’s a resume for Shokat Ahmed, return: "Resume of Shokat Ahmed".
-    - If it’s an invoice for Acme Corp, return: "Invoice for Acme Corp".
-    - If it’s a generic research paper, return: "Research Paper on Climate Change".
+    Your output should be a valid JSON object in the following structure:
+    {{
+      "sub_topics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4"]
+    }}
+
+    Examples:
+    - For a resume: 
+      {{
+        "sub_topics": ["Cloud Computing", "Full-Stack Development", "AWS Expertise", "Leadership"]
+      }}
+    - For a project report:
+      {{
+        "sub_topics": ["Algorithms", "Sorting Techniques", "Graph Theory", "Tree Structures"]
+      }}
+    - For a presentation:
+      {{
+        "sub_topics": ["Digital Transformation", "Key Performance Indicators", "Employee Engagement", "Future Strategies"]
+      }}
+    - For an invoice:
+      {{
+        "sub_topics": ["Payment Details", "Software Development Services", "Invoice #12345", "January 2025"]
+      }}
 
     Text:
     {file_stream[:5000]}
 
-    Provide only the single descriptive sentence as output, with no additional text or formatting.
+    Provide only the JSON object as output with no additional explanations or text.
     """
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
@@ -499,10 +514,21 @@ def get_number_of_pages(file_stream):
 # 8. Generate document title
 def generate_document_title(file_stream):
     prompt = f"""
-    Based on the content provided below, generate a concise, meaningful, and relevant title that reflects the essence of the document.
+     Analyze the following text and identify the primary topic of the document. Focus on determining:
+    - The nature of the document (e.g., Resume, Invoice, Project Report, Research Paper, etc.).
+    - The associated person, company, or entity (if applicable).
+    - The subject or key purpose of the document.
+
+    Return a **single descriptive sentence** combining these elements to serve as a new, meaningful file name. For example:
+    - If it’s Harshith's report on Data Structures, return: "Data Structures Report of Harshith".
+    - If it’s a resume for Shokat Ahmed, return: "Resume of Shokat Ahmed".
+    - If it’s an invoice for Acme Corp, return: "Invoice for Acme Corp".
+    - If it’s a generic research paper, return: "Research Paper on Climate Change".
 
     Text:
-    {file_stream[:2000]}  # Only include the first 1000 characters for efficiency
+    {file_stream[:5000]}
+
+    Provide only the single descriptive sentence as output, with no additional text or formatting.
     """
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
