@@ -1,5 +1,5 @@
 import json
-import openai
+from openai import AzureOpenAI
 import os
 import pytesseract
 from PIL import Image
@@ -31,7 +31,16 @@ metadata_blob_service_client = BlobServiceClient.from_connection_string(os.geten
 metadata_container_client = metadata_blob_service_client.get_container_client(METADATA_CONTAINER_NAME)
 
 # Set your OpenAI API key
-openai.api_key = os.getenv('OPENAI_API_KEY')
+endpoint = "https://weez-openai-resource.openai.azure.com/"
+api_key = os.getenv("OPENAI_API_KEY")
+api_version = "2024-12-01-preview"
+deployment = "gpt-35-turbo"
+
+ client = AzureOpenAI(
+        api_key=api_key,
+        api_version=api_version,
+        azure_endpoint=endpoint
+    )
 
 # File identification based on extension
 image_extensions = (
@@ -266,12 +275,21 @@ def summarize_text(file_stream):
     Format the summary as a single sentence of no more than 20 words.
     """}
     ]
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for summarization using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=messages,
         max_tokens=100
     )
-    return response['choices'][0]['message']['content'].strip()
+    
+    # Extract and return the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Close the client
+    client.close()
+    
+    return result
 
 
 def analyze_code(file_stream):
@@ -279,13 +297,21 @@ def analyze_code(file_stream):
         {"role": "user",
          "content": f"Tell me for what purpose this code is meant for, give directly the purpose only (in 20 words):\n\n{file_stream}"}
     ]
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for code analysis using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=messages,
         max_tokens=100
     )
-    return response['choices'][0]['message']['content'].strip()
-
+    
+    # Extract and return the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Close the client
+    client.close()
+    
+    return result
 
 # 4. Extract IDs and classify document as "Normal" or "Receipt/Invoice"
 """""
@@ -316,24 +342,31 @@ def extract_ids_and_classify(file_stream):
          and a normal text.
          :\n\n{file_stream[:3000]}"""}
     ]
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for ID extraction using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=messages,
         max_tokens=200
     )
-
+    
+    # Extract response content
+    result = response.choices[0].message.content.strip()
+    
     # Response might include ID names and values in a list or formatted way
-    ids_info = response['choices'][0]['message']['content'].strip().splitlines()
-
+    ids_info = result.splitlines()
     ids = {}
     for i, line in enumerate(ids_info):
         if ": " in line:
             key, value = line.split(": ")
             ids[key.strip()] = value.strip()
-
+    
     # Determine if it's a normal document or an invoice/receipt based on number of IDs
     document_type = "Receipt/Invoice" if len(ids) > 1 else "Normal"
-
+    
+    # Close the client
+    client.close()
+    
     return {
         "ids": ids,
         "document_type": document_type
@@ -345,12 +378,10 @@ def extract_single_topic(file_stream):
     prompt = f"""
     Analyze the following text and identify 3-4 key sub-topics that summarize the content of the document. 
     Focus on extracting meaningful, specific, and relevant topics or ideas discussed in the text. Avoid generic or overly broad terms and be consistent and specific to the text.
-
     Your output should be a valid JSON object in the following structure:
     {{
       "sub_topics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4"]
     }}
-
     Examples:
     - For a resume: 
       {{
@@ -368,37 +399,52 @@ def extract_single_topic(file_stream):
       {{
         "sub_topics": ["Payment Details", "Software Development Services", "Invoice #12345", "January 2025"]
       }}
-
     Text:
     {file_stream[:5000]}
-
     Provide only the JSON object as output with no additional explanations or text.
     """
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for topic extraction using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=150
     )
-    return response['choices'][0]['message']['content'].strip()
-
+    
+    # Extract the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Close the client
+    client.close()
+    
+    return result
 
 # 6. Generate contextual tags
 def generate_contextual_tags(file_stream):
     prompt = f"""
     Analyze the following text and provide a list of concise contextual tags (in single words or short phrases)
     that represent the main themes and key points. Do not provide long descriptions or explanations—just the tags.(just include top 5)
-
     Text:
     {file_stream[:2000]}
-
     Return the tags as a comma-separated list without any additional formatting or descriptions.
     """
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for tag generation using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100
     )
-    tags = response['choices'][0]['message']['content'].strip().split(",")
+    
+    # Extract the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Process tags
+    tags = result.split(",")
+    
+    # Close the client
+    client.close()
+    
     return [tag.strip() for tag in tags]
 
 
@@ -407,19 +453,25 @@ def check_document_importance(file_stream):
     prompt = f"""
     Analyze the following document and determine whether it contains critical information such as deadlines, important messages, 
     or key updates. Consider the perspective of a working professional or college student or school student. 
-
     Return your response as "YES" (important) or "NO" (not important).
-
     Text:
     {file_stream[:5000]}
     """
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for importance check using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=10
     )
-    return response['choices'][0]['message']['content'].strip()
-
+    
+    # Extract the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Close the client
+    client.close()
+    
+    return result
 
 def get_file_extension(file_name):
     file_extension = os.path.splitext(file_name)[1].lower()
@@ -518,24 +570,30 @@ def generate_document_title(file_stream):
     - The nature of the document (e.g., Resume, Invoice, Project Report, Research Paper, etc.).
     - The associated person, company, or entity (if applicable).
     - The subject or key purpose of the document.
-
     Return a **single descriptive sentence** combining these elements to serve as a new, meaningful file name. For example:
-    - If it’s Harshith's report on Data Structures, return: "Data Structures Report of Harshith".
-    - If it’s a resume for Shokat Ahmed, return: "Resume of Shokat Ahmed".
-    - If it’s an invoice for Acme Corp, return: "Invoice for Acme Corp".
-    - If it’s a generic research paper, return: "Research Paper on Climate Change".
-
+    - If it's Harshith's report on Data Structures, return: "Data Structures Report of Harshith".
+    - If it's a resume for Shokat Ahmed, return: "Resume of Shokat Ahmed".
+    - If it's an invoice for Acme Corp, return: "Invoice for Acme Corp".
+    - If it's a generic research paper, return: "Research Paper on Climate Change".
     Text:
     {file_stream[:5000]}
-
     Provide only the single descriptive sentence as output, with no additional text or formatting.
     """
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+    
+    # Call Azure OpenAI API for title generation using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=50
     )
-    return response['choices'][0]['message']['content'].strip()
+    
+    # Extract the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Close the client
+    client.close()
+    
+    return result
 
 
 def getFileName(file_path):
