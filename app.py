@@ -286,7 +286,6 @@ def summarize_text(file_stream):
     result = response.choices[0].message.content.strip()
     
     # Close the client
-    client.close()
     
     return result
 
@@ -308,7 +307,6 @@ def analyze_code(file_stream):
     result = response.choices[0].message.content.strip()
     
     # Close the client
-    client.close()
     
     return result
 
@@ -364,7 +362,6 @@ def extract_ids_and_classify(file_stream):
     document_type = "Receipt/Invoice" if len(ids) > 1 else "Normal"
     
     # Close the client
-    client.close()
     
     return {
         "ids": ids,
@@ -414,7 +411,6 @@ def extract_single_topic(file_stream):
     result = response.choices[0].message.content.strip()
     
     # Close the client
-    client.close()
     
     return result
 
@@ -442,7 +438,6 @@ def generate_contextual_tags(file_stream):
     tags = result.split(",")
     
     # Close the client
-    client.close()
     
     return [tag.strip() for tag in tags]
 
@@ -468,7 +463,6 @@ def check_document_importance(file_stream):
     result = response.choices[0].message.content.strip()
     
     # Close the client
-    client.close()
     
     return result
 
@@ -590,7 +584,6 @@ def generate_document_title(file_stream):
     result = response.choices[0].message.content.strip()
     
     # Close the client
-    client.close()
     
     return result
 
