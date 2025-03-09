@@ -35,8 +35,7 @@ endpoint = "https://weez-openai-resource.openai.azure.com/"
 api_key = os.getenv("OPENAI_API_KEY")
 api_version = "2024-12-01-preview"
 deployment = "gpt-35-turbo"
-
- client = AzureOpenAI(
+client = AzureOpenAI(
         api_key=api_key,
         api_version=api_version,
         azure_endpoint=endpoint
