@@ -35,7 +35,8 @@ endpoint = "https://weez-openai-resource.openai.azure.com/"
 api_key = os.getenv("OPENAI_API_KEY")
 api_version = "2024-12-01-preview"
 deployment = "gpt-35-turbo"
-client = AzureOpenAI(
+def get_openai_client():
+    return AzureOpenAI(
         api_key=api_key,
         api_version=api_version,
         azure_endpoint=endpoint
@@ -268,6 +269,7 @@ def process_text_for_summarization_or_analysis(file_type, file_stream):
 
 
 def summarize_text(file_stream):
+    client = get_openai_client()
     messages = [
         {"role": "user", "content": f"""Summarize the main content of the following document in a precise and concise manner, focusing only on the core details. 
     Ensure the summary is structured in a single paragraph and is useful for metadata generation.\n\n{file_stream[:5000]}
@@ -291,6 +293,7 @@ def summarize_text(file_stream):
 
 
 def analyze_code(file_stream):
+    client = get_openai_client()
     messages = [
         {"role": "user",
          "content": f"Tell me for what purpose this code is meant for, give directly the purpose only (in 20 words):\n\n{file_stream}"}
@@ -332,6 +335,7 @@ def extract_ids_and_classify(data):
 
 
 def extract_ids_and_classify(file_stream):
+    client = get_openai_client()
     messages = [
         {"role": "user", "content": f"""Your work is to find out the necessary ids present in the text it can be transaction id, customer id, receipt id, GSTIN id based on the text. 
          Hence retrieve the ids from the text ans just output those id present in the text and nothing else. (ignore the address and phone no. also addresses) format of output 
@@ -371,6 +375,7 @@ def extract_ids_and_classify(file_stream):
 
 # 5. Topic extraction
 def extract_single_topic(file_stream):
+    client = get_openai_client()
     prompt = f"""
     Analyze the following text and identify 3-4 key sub-topics that summarize the content of the document. 
     Focus on extracting meaningful, specific, and relevant topics or ideas discussed in the text. Avoid generic or overly broad terms and be consistent and specific to the text.
@@ -416,6 +421,7 @@ def extract_single_topic(file_stream):
 
 # 6. Generate contextual tags
 def generate_contextual_tags(file_stream):
+    client = get_openai_client()
     prompt = f"""
     Analyze the following text and provide a list of concise contextual tags (in single words or short phrases)
     that represent the main themes and key points. Do not provide long descriptions or explanations—just the tags.(just include top 5)
@@ -444,6 +450,7 @@ def generate_contextual_tags(file_stream):
 
 # 7. Check document importance
 def check_document_importance(file_stream):
+    client = get_openai_client()
     prompt = f"""
     Analyze the following document and determine whether it contains critical information such as deadlines, important messages, 
     or key updates. Consider the perspective of a working professional or college student or school student. 
@@ -558,6 +565,7 @@ def get_number_of_pages(file_stream):
 
 # 8. Generate document title
 def generate_document_title(file_stream):
+    client = get_openai_client()
     prompt = f"""
      Analyze the following text and identify the primary topic of the document. Focus on determining:
     - The nature of the document (e.g., Resume, Invoice, Project Report, Research Paper, etc.).
