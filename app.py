@@ -650,6 +650,28 @@ def check_metadata_if_exists(user_id, file_name):
     return blob_client.exists()
 
 
+@app.route('/api/files/count/<username>', methods=['GET'])
+def get_user_files_count(username):
+    try:
+        if not username:
+            return jsonify({"error": "Username parameter is required"}), 400
+        prefix = f"{username}/"
+        
+        # Count the blobs
+        count = 0
+        blobs = metadata_container_client.list_blobs(name_starts_with=prefix)
+        for _ in blobs:
+            count += 1
+        
+        return jsonify({
+            "count": count,
+            "username": username
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error fetching blob count: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/generate-metadata', methods=['POST'])
 def generate_metadata_endpoint():
     data = request.get_json()
