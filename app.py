@@ -68,9 +68,36 @@ def generate_and_save_metadata(metadata, file_name, user_id):
             overwrite=False,  # Prevents overwriting in case of race conditions
             content_settings=ContentSettings(content_type="application/json")
         )
+        
+        # Call the process-single-embeddings API after metadata is saved
+        try:
+            import requests
+            
+            # URL for the embeddings processing API
+            embedding_api_url = "https://process-embeddings-fdh0ckfnaddta4bw.canadacentral-01.azurewebsites.net/process_single_embedding"
+            
+            # Prepare the request data
+            payload = {
+                "user_id": user_id,
+                "blob_name": f"{user_id}/{file_name}.json"
+            }
+            
+            # Make the API call
+            response = requests.post(embedding_api_url, json=payload)
+            
+            # Log the response for debugging
+            print(f"Embedding API response: {response.status_code}")
+            if response.status_code == 200:
+                print("Successfully processed embeddings for the file")
+            else:
+                print(f"Failed to process embeddings: {response.text}")
+                
+        except Exception as e:
+            print(f"Error calling the embedding API: {str(e)}")
     else:
         print(f"Blob {user_id}/{file_name}.json already exists. Metadata not uploaded.")
         return
+        
     original_blob_client = metadata_blob_service_client.get_blob_client(blob=f"{user_id}/{file_name}",container="weez-user-data")
 
     # Delete the original file
@@ -79,7 +106,6 @@ def generate_and_save_metadata(metadata, file_name, user_id):
         print(f"Original file {file_name} deleted successfully from the weez-user-file container.")
     except Exception as e:
         print(f"Failed to delete the original file {file_name}: {e}")
-
 
 def read_blob_to_memory(container_name, blob_name):
     blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
