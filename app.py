@@ -3,21 +3,18 @@ from openai import AzureOpenAI
 import os
 import pytesseract
 from PIL import Image
-#import textract
 from PyPDF2 import PdfReader
 from pptx import Presentation
 from docx import Document
-#from textract import process
 from flask import Flask, request, jsonify
 from io import BytesIO
 from azure.storage.blob import BlobServiceClient, ContentSettings
-#import io
-#import tempfile
 import openpyxl
+import requests  # Import requests for making HTTP calls
 
 app = Flask(__name__)
-app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True  # Format JSON response nicely
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 16 MB limit for content size
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
 AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING_1')
 CONTAINER_NAME = 'weez-user-data'
@@ -30,11 +27,11 @@ container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 metadata_blob_service_client = BlobServiceClient.from_connection_string(os.getenv('AZURE_METADATA_STORAGE_CONNECTION_STRING'))
 metadata_container_client = metadata_blob_service_client.get_container_client(METADATA_CONTAINER_NAME)
 
-# Set your OpenAI API key
 endpoint = "https://weez-openai-resource.openai.azure.com/"
 api_key = os.getenv("OPENAI_API_KEY")
 api_version = "2024-12-01-preview"
 deployment = "gpt-35-turbo"
+
 def get_openai_client():
     return AzureOpenAI(
         api_key=api_key,
@@ -42,105 +39,66 @@ def get_openai_client():
         azure_endpoint=endpoint
     )
 
-# File identification based on extension
-image_extensions = (
-    '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.svg', '.webp',
-    '.heic', '.ico', '.psd', '.eps', '.raw', '.ai'
-)
-document_extensions = (
-    '.pdf', '.docx', '.doc', '.txt', '.rtf', '.odt', '.xlsx', '.xls',
-    '.pptx', '.ppt', '.csv', '.epub', '.mobi', '.html', '.md', '.tex', '.xml'
-)
-coding_extensions = (
-    '.py', '.c', '.cpp', '.java', '.js', '.ts', '.go', '.swift', '.rb', '.r',
-    '.php', '.cs', '.kotlin', '.scala', '.rs', '.dart', '.m', '.h', '.pl',
-    '.vb', '.lua', '.asm', '.sh', '.bat', '.sql', '.ipynb'
-)
-
+image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.svg', '.webp', '.heic', '.ico', '.psd', '.eps', '.raw', '.ai')
+document_extensions = ('.pdf', '.docx', '.doc', '.txt', '.rtf', '.odt', '.xlsx', '.xls', '.pptx', '.ppt', '.csv', '.epub', '.mobi', '.html', '.md', '.tex', '.xml')
+coding_extensions = ('.py', '.c', '.cpp', '.java', '.js', '.ts', '.go', '.swift', '.rb', '.r', '.php', '.cs', '.kotlin', '.scala', '.rs', '.dart', '.m', '.h', '.pl', '.vb', '.lua', '.asm', '.sh', '.bat', '.sql', '.ipynb')
 
 def generate_and_save_metadata(metadata, file_name, user_id):
-    # Replace with actual metadata generation logic
     metadata_blob_client = metadata_container_client.get_blob_client(f"{user_id}/{file_name}.json")
     if not metadata_blob_client.exists():
-        # If it doesn't exist, upload the metadata and create the blob
+        # Upload the metadata blob
         metadata_blob_client.upload_blob(
             data=json.dumps(metadata),
-            overwrite=False,  # Prevents overwriting in case of race conditions
+            overwrite=False,
             content_settings=ContentSettings(content_type="application/json")
         )
-        
-        # Call the process-single-embeddings API after metadata is saved
+        print(f"Metadata for {file_name} uploaded successfully to {user_id}/{file_name}.json")
+
+        # Call the embeddings API after metadata is saved
         try:
-            import requests
-            
-            # URL for the embeddings processing API
             embedding_api_url = "https://process-embeddings-fdh0ckfnaddta4bw.canadacentral-01.azurewebsites.net/process_single_embedding"
-            
-            # Prepare the request data
             payload = {
                 "user_id": user_id,
-                "blob_name": f"{user_id}/{file_name}.json"
+                "blob_name": f"{user_id}/{file_name}.json"  # Full blob path
             }
-            
-            # Make the API call
             response = requests.post(embedding_api_url, json=payload)
             
-            # Log the response for debugging
-            print(f"Embedding API response: {response.status_code}")
             if response.status_code == 200:
-                print("Successfully processed embeddings for the file")
+                print(f"Successfully generated embeddings for {file_name}: {response.text}")
             else:
-                print(f"Failed to process embeddings: {response.text}")
-                
+                print(f"Failed to generate embeddings for {file_name}: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"Error calling the embedding API: {str(e)}")
+            print(f"Error calling embeddings API for {file_name}: {str(e)}")
+
+        # Delete the original file from weez-user-data container
+        original_blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=f"{user_id}/{file_name}")
+        try:
+            original_blob_client.delete_blob()
+            print(f"Original file {file_name} deleted successfully from {CONTAINER_NAME}.")
+        except Exception as e:
+            print(f"Failed to delete original file {file_name}: {str(e)}")
     else:
         print(f"Blob {user_id}/{file_name}.json already exists. Metadata not uploaded.")
-        return
-        
-    original_blob_client = metadata_blob_service_client.get_blob_client(blob=f"{user_id}/{file_name}",container="weez-user-data")
 
-    # Delete the original file
-    try:
-        original_blob_client.delete_blob()
-        print(f"Original file {file_name} deleted successfully from the weez-user-file container.")
-    except Exception as e:
-        print(f"Failed to delete the original file {file_name}: {e}")
-
+# Rest of the helper functions remain unchanged
 def read_blob_to_memory(container_name, blob_name):
     blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
     stream = BytesIO()
     blob_client.download_blob().readinto(stream)
-    stream.seek(0)  # Reset the stream position to the start
+    stream.seek(0)
     return stream
 
-
-# 1. Detect file type based on extension
 def get_file_type(file_name):
-    """if file_name.endswith(image_extensions):
-        return "image"
-    elif file_name.endswith(document_extensions):
-        return "document"
-    elif file_name.endswith(coding_extensions):
-        return "code"
-    else:
-        return "others"""
     file_name = file_name.lower()
-
-    # Check file type based on extensions
     if file_name.endswith(image_extensions):
         return "image"
     elif file_name.endswith(document_extensions):
-        # Return the specific document type with the leading dot
         return next((ext for ext in document_extensions if file_name.endswith(ext)), "others")
     elif file_name.endswith(coding_extensions):
-        # Return the specific code file type with the leading dot
         return next((ext for ext in coding_extensions if file_name.endswith(ext)), "others")
     else:
         return "others"
 
-
-# 2. Text extraction logic based on file type
 def extract_text(file_stream, file_type):
     file_stream.seek(0)
     if file_type in image_extensions:
@@ -152,147 +110,53 @@ def extract_text(file_stream, file_type):
     else:
         return None
 
-
-# OCR for images
 def extract_text_from_image(image_stream):
     img = Image.open(image_stream)
     return pytesseract.image_to_string(img)
 
-
-# Textract for documents
-#def extract_text_from_document(doc_stream):"""
-   #"""with tempfile.NamedTemporaryFile(delete=True) as temp_file:
-        # Write the file stream content to the temp file
-        #temp_file.write(doc_stream.read())
-        #temp_file.flush()
-    #return textract.process(doc_stream).decode('utf-8')""
-    #with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        # Write the content of the BytesIO stream to the temp file
-        #temp_file.write(doc_stream.read())
-        #temp_file_path = temp_file.name  # Get the path of the temporary file
-
-    #try:
-        # Pass the temporary file path to textract
-        #file_bytes = doc_stream.read()
-        #text = textract.process(io.BytesIO(file_bytes), encoding='utf-8').decode('utf-8') #first parameter was temp_file_path
-    #except UnicodeDecodeError:
-        #try:
-            #file_bytes = doc_stream.read()
-            # If UTF-8 fails, fall back to ISO-8859-1 encoding
-            #text = textract.process(io.BytesIO(file_bytes), encoding='ISO-8859-1').decode('ISO-8859-1') #here also see just above
-        #except UnicodeDecodeError:
-            #try:
-                #file_bytes = doc_stream.read()
-                # If ISO-8859-1 fails, fall back to cp1252 encoding
-                #text = textract.process(io.BytesIO(file_bytes), encoding='cp1252').decode('cp1252') # here also the same see above
-            #except UnicodeDecodeError:
-                # If all fallback encodings fail, handle the error appropriately (e.g., log, empty string)
-                #print("Error: Unable to decode text with common encodings.")
-                #text = ""  # Return an empty string if all decoding attempts fail
-
-    #finally:
-        # Ensure the temporary file is deleted after processing
-        #os.remove(temp_file_path)
-
-    #return text
-    #"""
-   #"""
-   #try:
-        # Read the content from the BytesIO stream
-        #file_bytes = doc_stream.read()
-
-        # Create a temporary file to write the file content
-       # with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-       #    temp_file.write(file_bytes)
-       #     temp_file.flush()  # Ensure that the content is written to disk
-      #      temp_file_path = temp_file.name  # Get the temporary file path
-
-        # Pass the temporary file path to textract for text extraction
-     #   text = textract.process(temp_file_path, encoding='utf-8').decode('utf-8')
-
-        # Clean up the temporary file
-    #    os.remove(temp_file_path)
-
-   # except UnicodeDecodeError:
-   #     try:
-   #         # If UTF-8 fails, fall back to ISO-8859-1 encoding
-   #         text = textract.process(temp_file_path, encoding='ISO-8859-1').decode('ISO-8859-1')
-   #     except UnicodeDecodeError:
-  #          try:
- #               # If ISO-8859-1 fails, fall back to cp1252 encoding
- #               text = textract.process(temp_file_path, encoding='cp1252').decode('cp1252')
-#            except UnicodeDecodeError:
-#                print("Error: Unable to decode text with common encodings.")
-#                text = ""  # Return an empty string if all decoding attempts fail
-#
-#    except Exception as e:
-#        # Handle any unexpected exceptions
- #       print(f"Error processing document: {e}")
-#        text = ""  # Return an empty string in case of error
-
-    #return text"""
 def extract_text_from_document(doc_stream, file_type):
-  text = ""
-  file_type = file_type.lower()
-
-  try:
-    if file_type == ".pdf":
-        # Extract text from PDF
-        reader = PdfReader(doc_stream)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-
-    elif file_type == ".docx":
-        # Extract text from Word document
-        doc = Document(doc_stream)
-        for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n"
-
-    elif file_type == ".pptx":
-        # Extract text from PowerPoint presentation
-        presentation = Presentation(doc_stream)
-        for slide in presentation.slides:
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        for run in paragraph.runs:
-                            text += run.text
+    text = ""
+    file_type = file_type.lower()
+    try:
+        if file_type == ".pdf":
+            reader = PdfReader(doc_stream)
+            for page in reader.pages:
+                text += page.extract_text() or ""
+        elif file_type == ".docx":
+            doc = Document(doc_stream)
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+        elif file_type == ".pptx":
+            presentation = Presentation(doc_stream)
+            for slide in presentation.slides:
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for paragraph in shape.text_frame.paragraphs:
+                            for run in paragraph.runs:
+                                text += run.text
                         text += "\n"
+        elif file_type == ".xlsx":
+            workbook = openpyxl.load_workbook(doc_stream)
+            for sheet in workbook.sheetnames:
+                sheet_obj = workbook[sheet]
+                text += f"\n--- Sheet: {sheet} ---\n"
+                for row in sheet_obj.iter_rows(values_only=True):
+                    row_text = " ".join([str(cell) if cell is not None else "" for cell in row])
+                    text += row_text + "\n"
+        else:
+            raise ValueError("Unsupported file type: " + file_type)
+    except Exception as e:
+        return f"Error processing the file: {e}"
+    return text
 
-    elif file_type == "xlsx":
-        # Extract text from Excel spreadsheet
-        workbook = openpyxl.load_workbook(doc_stream)
-        for sheet in workbook.sheetnames:
-            sheet_obj = workbook[sheet]
-            text += f"\n--- Sheet: {sheet} ---\n"
-            for row in sheet_obj.iter_rows(values_only=True):
-                row_text = " ".join([str(cell) if cell is not None else "" for cell in row])
-                text += row_text + "\n"
-
-    else:
-        raise ValueError("Unsupported file type: " + file_type)
-
-  except Exception as e:
-    return f"Error processing the file: {e}"
-
-  return text
-
-
-
-
-
-# Direct read for coding files
 def extract_text_from_code(code_stream):
     return code_stream.read().decode('utf-8')
 
-
-# 3. Summarization/Code analysis logic
 def process_text_for_summarization_or_analysis(file_type, file_stream):
     if file_type == "code":
         return analyze_code(file_stream)
     else:
         return summarize_text(file_stream)
-
 
 def summarize_text(file_stream):
     client = get_openai_client()
@@ -302,63 +166,16 @@ def summarize_text(file_stream):
     Format the summary as a single sentence of no more than 20 words.
     """}
     ]
-    
-    # Call Azure OpenAI API for summarization using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=messages,
-        max_tokens=100
-    )
-    
-    # Extract and return the response content
-    result = response.choices[0].message.content.strip()
-    
-    # Close the client
-    
-    return result
-
+    response = client.chat.completions.create(model=deployment, messages=messages, max_tokens=100)
+    return response.choices[0].message.content.strip()
 
 def analyze_code(file_stream):
     client = get_openai_client()
     messages = [
-        {"role": "user",
-         "content": f"Tell me for what purpose this code is meant for, give directly the purpose only (in 20 words):\n\n{file_stream}"}
+        {"role": "user", "content": f"Tell me for what purpose this code is meant for, give directly the purpose only (in 20 words):\n\n{file_stream}"}
     ]
-    
-    # Call Azure OpenAI API for code analysis using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=messages,
-        max_tokens=100
-    )
-    
-    # Extract and return the response content
-    result = response.choices[0].message.content.strip()
-    
-    # Close the client
-    
-    return result
-
-# 4. Extract IDs and classify document as "Normal" or "Receipt/Invoice"
-"""""
-def extract_ids_and_classify(data):
-     messages = [
-         {"role": "user", "content": f"Find all the IDs (e.g., transaction id, customer id, etc.) from the text:\n\n{data}"}
-     ]
-     response = openai.ChatCompletion.create(
-         model="gpt-3.5-turbo",
-         messages=messages,
-         max_tokens=150
-    )
-     ids = response['choices'][0]['message']['content'].strip().splitlines()
-     ids = [id.strip() for id in ids if id]
-     document_type = "Receipt/Invoice" if len(ids) > 1 else "Normal"
-     return {
-        "ids": ids,
-        "document_type": document_type
-    }
-"""
-
+    response = client.chat.completions.create(model=deployment, messages=messages, max_tokens=100)
+    return response.choices[0].message.content.strip()
 
 def extract_ids_and_classify(file_stream):
     client = get_openai_client()
@@ -369,37 +186,17 @@ def extract_ids_and_classify(file_stream):
          and a normal text.
          :\n\n{file_stream[:3000]}"""}
     ]
-    
-    # Call Azure OpenAI API for ID extraction using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=messages,
-        max_tokens=200
-    )
-    
-    # Extract response content
+    response = client.chat.completions.create(model=deployment, messages=messages, max_tokens=200)
     result = response.choices[0].message.content.strip()
-    
-    # Response might include ID names and values in a list or formatted way
     ids_info = result.splitlines()
     ids = {}
-    for i, line in enumerate(ids_info):
+    for line in ids_info:
         if ": " in line:
             key, value = line.split(": ")
             ids[key.strip()] = value.strip()
-    
-    # Determine if it's a normal document or an invoice/receipt based on number of IDs
     document_type = "Receipt/Invoice" if len(ids) > 1 else "Normal"
-    
-    # Close the client
-    
-    return {
-        "ids": ids,
-        "document_type": document_type
-    }
+    return {"ids": ids, "document_type": document_type}
 
-
-# 5. Topic extraction
 def extract_single_topic(file_stream):
     client = get_openai_client()
     prompt = f"""
@@ -409,43 +206,13 @@ def extract_single_topic(file_stream):
     {{
       "sub_topics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4"]
     }}
-    Examples:
-    - For a resume: 
-      {{
-        "sub_topics": ["Cloud Computing", "Full-Stack Development", "AWS Expertise", "Leadership"]
-      }}
-    - For a project report:
-      {{
-        "sub_topics": ["Algorithms", "Sorting Techniques", "Graph Theory", "Tree Structures"]
-      }}
-    - For a presentation:
-      {{
-        "sub_topics": ["Digital Transformation", "Key Performance Indicators", "Employee Engagement", "Future Strategies"]
-      }}
-    - For an invoice:
-      {{
-        "sub_topics": ["Payment Details", "Software Development Services", "Invoice #12345", "January 2025"]
-      }}
     Text:
     {file_stream[:5000]}
     Provide only the JSON object as output with no additional explanations or text.
     """
-    
-    # Call Azure OpenAI API for topic extraction using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=150
-    )
-    
-    # Extract the response content
-    result = response.choices[0].message.content.strip()
-    
-    # Close the client
-    
-    return result
+    response = client.chat.completions.create(model=deployment, messages=[{"role": "user", "content": prompt}], max_tokens=150)
+    return response.choices[0].message.content.strip()
 
-# 6. Generate contextual tags
 def generate_contextual_tags(file_stream):
     client = get_openai_client()
     prompt = f"""
@@ -455,26 +222,10 @@ def generate_contextual_tags(file_stream):
     {file_stream[:2000]}
     Return the tags as a comma-separated list without any additional formatting or descriptions.
     """
-    
-    # Call Azure OpenAI API for tag generation using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=100
-    )
-    
-    # Extract the response content
+    response = client.chat.completions.create(model=deployment, messages=[{"role": "user", "content": prompt}], max_tokens=100)
     result = response.choices[0].message.content.strip()
-    
-    # Process tags
-    tags = result.split(",")
-    
-    # Close the client
-    
-    return [tag.strip() for tag in tags]
+    return [tag.strip() for tag in result.split(",")]
 
-
-# 7. Check document importance
 def check_document_importance(file_stream):
     client = get_openai_client()
     prompt = f"""
@@ -484,32 +235,17 @@ def check_document_importance(file_stream):
     Text:
     {file_stream[:5000]}
     """
-    
-    # Call Azure OpenAI API for importance check using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=10
-    )
-    
-    # Extract the response content
-    result = response.choices[0].message.content.strip()
-    
-    # Close the client
-    
-    return result
+    response = client.chat.completions.create(model=deployment, messages=[{"role": "user", "content": prompt}], max_tokens=10)
+    return response.choices[0].message.content.strip()
 
 def get_file_extension(file_name):
     file_extension = os.path.splitext(file_name)[1].lower()
     return file_extension.lstrip('.')
 
-
 def get_file_size_in_mb(file_stream):
-    file_stream.seek(0, os.SEEK_END)  # Seek to end of stream to get size
+    file_stream.seek(0, os.SEEK_END)
     file_size_bytes = file_stream.tell()
-    file_stream.seek(0)  # Reset to start for further processing
-
-    # Size conversion logic
+    file_stream.seek(0)
     if file_size_bytes >= 1073741824:
         return f"{file_size_bytes / 1073741824:.2f} GB"
     elif file_size_bytes >= 1048576:
@@ -518,78 +254,30 @@ def get_file_size_in_mb(file_stream):
         return f"{file_size_bytes / 1024:.2f} KB"
     return f"{file_size_bytes} Bytes"
 
-"""
 def get_number_of_pages(file_stream):
-    # Get file extension
     file_extension = get_file_extension(file_stream)
-
-    # Check for different document types and count the number of pages
     if file_extension == 'pdf':
-        # For PDF files, use PyPDF2 to count pages
-        with open(file_stream, 'rb') as file:
-            reader = PdfReader(file)
-            return len(reader.pages)
-
-    elif file_extension in ['docx', 'doc']:
-        # For DOCX or DOC files, use python-docx to get page count (approximated by number of paragraphs)
-        doc = Document(file_stream)
-        return len(doc.paragraphs) // 50  # Approximate 50 paragraphs per page
-
-    elif file_extension == 'pptx':
-        # For PowerPoint presentations, count the number of slides (1 slide = 1 page)
-        presentation = Presentation(file_stream)
-        return len(presentation.slides)
-
-    elif file_extension in ['txt']:
-        # For text files, assume 1 page
-        return 1
-
-    elif file_extension in ['rtf']:
-        # For RTF (Rich Text Format) files, count by text length
-        text = process(file_stream).decode('utf-8')
-        return len(text) // 3000  # Approximate based on character length per page
-
-    else:
-        return None  # No pages for unsupported file types or non-document files
-"""
-def get_number_of_pages(file_stream):
-    # Get file extension
-    file_extension = get_file_extension(file_stream)
-
-    # Check for different document types and count the number of pages
-    if file_extension == 'pdf':
-        # For PDF files, use PyPDF2 to count pages
-        file_stream.seek(0)  # Reset the file stream position to the start
+        file_stream.seek(0)
         reader = PdfReader(file_stream)
         return len(reader.pages)
-
     elif file_extension in ['docx', 'doc']:
-        # For DOCX or DOC files, use python-docx to get page count (approximated by number of paragraphs)
-        file_stream.seek(0)  # Reset the file stream position to the start
+        file_stream.seek(0)
         doc = Document(file_stream)
-        return len(doc.paragraphs) // 50  # Approximate 50 paragraphs per page
-
+        return len(doc.paragraphs) // 50
     elif file_extension == 'pptx':
-        # For PowerPoint presentations, count the number of slides (1 slide = 1 page)
-        file_stream.seek(0)  # Reset the file stream position to the start
+        file_stream.seek(0)
         presentation = Presentation(file_stream)
         return len(presentation.slides)
-
     elif file_extension in ['txt']:
-        # For text files, assume 1 page
-        file_stream.seek(0)  # Reset the file stream position to the start
+        file_stream.seek(0)
         return 1
-
     elif file_extension in ['rtf']:
-        # For RTF (Rich Text Format) files, count by text length
-        file_stream.seek(0)  # Reset the file stream position to the start
+        file_stream.seek(0)
         text = file_stream.read().decode('utf-8')
-        return len(text) // 3000  # Approximate based on character length per page
-
+        return len(text) // 3000
     else:
         return None
 
-# 8. Generate document title
 def generate_document_title(file_stream):
     client = get_openai_client()
     prompt = f"""
@@ -597,71 +285,41 @@ def generate_document_title(file_stream):
     - The nature of the document (e.g., Resume, Invoice, Project Report, Research Paper, etc.).
     - The associated person, company, or entity (if applicable).
     - The subject or key purpose of the document.
-    Return a **single descriptive sentence** combining these elements to serve as a new, meaningful file name. For example:
-    - If it's Harshith's report on Data Structures, return: "Data Structures Report of Harshith".
-    - If it's a resume for Shokat Ahmed, return: "Resume of Shokat Ahmed".
-    - If it's an invoice for Acme Corp, return: "Invoice for Acme Corp".
-    - If it's a generic research paper, return: "Research Paper on Climate Change".
+    Return a **single descriptive sentence** combining these elements to serve as a new, meaningful file name.
     Text:
     {file_stream[:5000]}
     Provide only the single descriptive sentence as output, with no additional text or formatting.
     """
-    
-    # Call Azure OpenAI API for title generation using new client syntax
-    response = client.chat.completions.create(
-        model=deployment,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=50
-    )
-    
-    # Extract the response content
-    result = response.choices[0].message.content.strip()
-    
-    # Close the client
-    
-    return result
-
+    response = client.chat.completions.create(model=deployment, messages=[{"role": "user", "content": prompt}], max_tokens=50)
+    return response.choices[0].message.content.strip()
 
 def getFileName(file_path):
     return os.path.basename(file_path)
 
-
-# 9. Metadata generation based on document type
 def generate_metadata(file_name, file_path, data, file_stream):
     file_type = get_file_type(file_name)
-
-    # document_size = os.path.getsize(file_stream)
-
     if file_type in document_extensions or file_type in image_extensions:
         ids_info = extract_ids_and_classify(data)
-
         metadata = {
             "file_path": file_path,
-            "default_file_name": file_name,  # getFileName(file_path),
+            "default_file_name": file_name,
             "document_title": generate_document_title(data),
             "file_type": get_file_extension(file_name),
             "document_size": get_file_size_in_mb(file_stream),
-            "number_of_pages": f"{get_number_of_pages(data)}, Page",
+            "number_of_pages": f"{get_number_of_pages(file_stream)}, Page",
             "data_summary": summarize_text(data),
             "topics": extract_single_topic(data),
             "contextual_tags": generate_contextual_tags(data),
             "importance": check_document_importance(data)
         }
-
-        # Add dynamically extracted IDs to the metadata
-        """if ids_info["document_type"] == "Receipt/Invoice":
-            for id_name, id_value in ids_info["ids"].items():
-                metadata[id_name] = id_value"""
-
         return metadata
-
     elif file_type in coding_extensions:
         return {
             "file_path": file_path,
-            "default_file_name": file_name,  # getFileName(file_path),
+            "default_file_name": file_name,
             "document_title": generate_document_title(data),
             "file_type": get_file_extension(data),
-            "document_size": f"{get_file_size_in_mb(data)}",
+            "document_size": get_file_size_in_mb(file_stream),
             "data_summary": analyze_code(data),
             "topics": extract_single_topic(data),
             "contextual_tags": generate_contextual_tags(data),
@@ -670,11 +328,9 @@ def generate_metadata(file_name, file_path, data, file_stream):
     else:
         return None
 
-
 def check_metadata_if_exists(user_id, file_name):
     blob_client = metadata_container_client.get_blob_client(f"{user_id}/{file_name}.json")
     return blob_client.exists()
-
 
 @app.route('/api/files/count/<username>', methods=['GET'])
 def get_user_files_count(username):
@@ -682,20 +338,13 @@ def get_user_files_count(username):
         if not username:
             return jsonify({"error": "Username parameter is required"}), 400
         prefix = f"{username}/"
-        
-        # Count the blobs
         count = 0
         blobs = metadata_container_client.list_blobs(name_starts_with=prefix)
         for _ in blobs:
             count += 1
-        
-        return jsonify({
-            "count": count,
-            "username": username
-        })
-        
+        return jsonify({"count": count, "username": username})
     except Exception as e:
-        current_app.logger.error(f"Error fetching blob count: {str(e)}")
+        app.logger.error(f"Error fetching blob count: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/generate-metadata', methods=['POST'])
@@ -706,7 +355,7 @@ def generate_metadata_endpoint():
     file_path = data.get('filePath')
     if not user_id or not file_name:
         return jsonify({'error': 'userID and fileName are required'}), 400
-    exists = check_metadata_if_exists(file_name, user_id)
+    exists = check_metadata_if_exists(user_id, file_name)  # Corrected order of arguments
     if exists:
         return jsonify({'error': 'Metadata Already Exists'}), 400
     blob_name = f"{user_id}/{file_name}"
@@ -719,11 +368,8 @@ def generate_metadata_endpoint():
     metadata = generate_metadata(file_name, file_path, extracted_text, file_stream)
     print("Generated the Metadata")
     generate_and_save_metadata(metadata, file_name, user_id)
-    print("Saved the Metadata also.. All done")
+    print("Saved the Metadata and triggered embeddings generation")
     return jsonify(metadata)
 
-
-print(generate_metadata_endpoint)
-# Run the Flask app
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
