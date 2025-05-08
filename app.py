@@ -21,11 +21,15 @@ AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING_1')
 CONTAINER_NAME = 'weez-user-data'
 AZURE_METADATA_STORAGE_CONNECTION_STRING = os.getenv('AZURE_METADATA_STORAGE_CONNECTION_STRING')
 METADATA_CONTAINER_NAME = 'weez-files-metadata'
+EMBEDDINGS_CONTAINER_NAME="weez-files-embeddings"
 
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 metadata_blob_service_client = BlobServiceClient.from_connection_string(AZURE_METADATA_STORAGE_CONNECTION_STRING)
 metadata_container_client = metadata_blob_service_client.get_container_client(METADATA_CONTAINER_NAME)
+embeddings_blob_service_client = BlobServiceClient.from_connection_string(AZURE_METADATA_STORAGE_CONNECTION_STRING)
+embeddings_container_client = metadata_blob_service_client.get_container_client(EMBEDDINGS_CONTAINER_NAME)
+
 
 # Azure OpenAI Configuration
 endpoint = "https://weez-openai-resource.openai.azure.com/"
@@ -57,6 +61,7 @@ coding_extensions = (
 def generate_and_save_metadata(metadata, file_name, user_id):
     metadata_blob_client = metadata_container_client.get_blob_client(f"{user_id}/{file_name}.json")
     if not metadata_blob_client.exists():
+        # Step 1: Save metadata to blob storage
         metadata_blob_client.upload_blob(
             data=json.dumps(metadata),
             overwrite=False,
@@ -64,19 +69,31 @@ def generate_and_save_metadata(metadata, file_name, user_id):
         )
         print(f"Metadata for {file_name} uploaded successfully to {user_id}/{file_name}.json")
 
-        # Call embeddings API
+        # Step 2: Call embeddings API
         try:
             embedding_api_url = "https://process-embeddings-fdh0ckfnaddta4bw.canadacentral-01.azurewebsites.net/process_single_embedding"
             payload = {"user_id": user_id, "blob_name": f"{user_id}/{file_name}.json"}
             response = requests.post(embedding_api_url, json=payload)
             if response.status_code == 200:
                 print(f"Successfully generated embeddings for {file_name}: {response.text}")
+
+                # Step 2.5: Call the index_from_blob function to index embeddings
+                try:
+                    # Construct the blob name in the embeddings container
+                    embeddings_blob_name = f"{user_id}/{file_name}.json"
+
+                    # Call the function to index the embeddings from the container
+                    index_result = index_embeddings_from_container(user_id, embeddings_blob_name, file_name)
+                    print(f"Indexing result for {file_name}: {index_result}")
+
+                except Exception as e:
+                    print(f"Error indexing embeddings for {file_name}: {str(e)}")
             else:
                 print(f"Failed to generate embeddings for {file_name}: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Error calling embeddings API for {file_name}: {str(e)}")
 
-        # Delete original file
+        # Step 3: Delete original file
         original_blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME,
                                                                    blob=f"{user_id}/{file_name}")
         try:
@@ -86,6 +103,65 @@ def generate_and_save_metadata(metadata, file_name, user_id):
             print(f"Failed to delete original file {file_name}: {str(e)}")
     else:
         print(f"Blob {user_id}/{file_name}.json already exists. Metadata not uploaded.")
+
+
+def index_embeddings_from_container(user_id, blob_name, file_name):
+    """
+    Access the embeddings container and index the embeddings in ElasticSearch
+
+    Args:
+        user_id (str): The user ID
+        blob_name (str): The name of the blob in the embeddings container
+        file_name (str): The original file name
+
+    Returns:
+        dict: The result of the indexing operation
+    """
+    try:
+
+        # Check if the blob exists in the embeddings container
+        embeddings_blob_client = embeddings_container_client.get_blob_client(blob_name)
+
+        # Download the blob content
+        blob_content = embeddings_blob_client.download_blob().readall().decode('utf-8')
+        blob_data = json.loads(blob_content)
+
+        # Check if embeddings exist in the blob data
+        if "embeddings" not in blob_data or not blob_data["embeddings"]:
+            return {
+                "status": "error",
+                "message": f"No embeddings found in blob {blob_name}"
+            }
+
+        # Call the ElasticSearch /index endpoint
+        es_index_url = "https://weez-elastic-search-api-ccbrbkgcffcndpgx.centralus-01.azurewebsites.net/index"  # Replace with your actual ES API URL
+        es_payload = {
+            "user_id": user_id,
+            "file_path": blob_data.get("file_path", f"{user_id}/{file_name}"),
+            "file_name": file_name,
+            "content": blob_data.get("content", f"File {file_name}"),
+            "embedding": blob_data["embeddings"]
+        }
+
+        es_response = requests.post(es_index_url, json=es_payload)
+
+        if es_response.status_code == 200:
+            return {
+                "status": "success",
+                "message": f"Successfully indexed embeddings for {file_name}",
+                "es_response": es_response.json()
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Failed to index embeddings: {es_response.status_code} - {es_response.text}"
+            }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Exception while indexing embeddings: {str(e)}"
+        }
 
 
 # Helper Functions
